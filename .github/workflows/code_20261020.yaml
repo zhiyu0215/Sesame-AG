@@ -21,7 +21,6 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # =========删掉了不稳定的 setup-android，由gradle自动管理SDK=========
       - name: Gradle Cache 加速依赖
         uses: actions/cache@v4
         with:
@@ -38,9 +37,13 @@ jobs:
       - name: 编译 Debug APK
         run: ./gradlew assembleDebug
 
+      # =====新增调试步骤，打印输出目录！=====
+      - name: 查看编译输出目录
+        run: ls -R app/build/outputs/apk
+
       - name: 上传APK产物
         uses: actions/upload-artifact@v4
         with:
           name: sesame-ag-dev-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/**/*.apk
           retention-days: 30
