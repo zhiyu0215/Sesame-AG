@@ -300,11 +300,11 @@ jobs:
             ${{ env.ASSET_DIR }}/*.sha256
           body_path: release-body.md
 
-      - name: 清理旧版本（保留最近10个）
+      - name: 清理旧版本（保留最近99个）
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          KEEP_LATEST: 10
+          KEEP_LATEST: 99
         run: |
           releases=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/$REPO/releases?per_page=100" | \
@@ -333,7 +333,97 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "✅ 旧版本清理完成" >> "$GITHUB_STEP_SUMMARY"
 
-  # 任务3：构建失败摘要补充
+# 任务3：发送邮件通知（带完整更新日志）
+  notify-email:
+    runs-on: ubuntu-latest
+    needs: [ sync-upstream, build-and-sign ]
+    if: ${{ always() && needs.build-and-sign.result != 'skipped' }}
+    steps:
+      # ✅ 修复：用shell脚本生成邮件内容，避免YAML多行字符串问题
+      - name: 生成邮件内容
+        id: gen_email
+        env:
+          BUILD_RESULT: ${{ needs.build-and-sign.result }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          TAG_NAME: ${{ needs.build-and-sign.outputs.tag_name }}
+          VERSION: ${{ needs.build-and-sign.outputs.version }}
+          BUILD_TIME: ${{ needs.build-and-sign.outputs.build_time }}
+          DEV_LATEST_COMMIT: ${{ needs.build-and-sign.outputs.dev_latest_commit }}
+          DEV_LATEST_COMMIT_MSG: ${{ needs.build-and-sign.outputs.dev_latest_commit_msg }}
+          DEV_LATEST_COMMIT_TIME: ${{ needs.build-and-sign.outputs.dev_latest_commit_time }}
+          MAIN_LATEST_COMMIT: ${{ needs.build-and-sign.outputs.main_latest_commit }}
+          MAIN_LATEST_COMMIT_MSG: ${{ needs.build-and-sign.outputs.main_latest_commit_msg }}
+          MAIN_LATEST_COMMIT_TIME: ${{ needs.build-and-sign.outputs.main_latest_commit_time }}
+          HAS_UPDATE: ${{ needs.sync-upstream.outputs.has_update }}
+          CHANGE_LOG: ${{ needs.sync-upstream.outputs.change_log }}
+        run: |
+          if [ "$BUILD_RESULT" == "success" ]; then
+            SUBJECT="✅ Sesame-AG 新版本构建发布成功"
+            {
+              echo "🎉 Sesame-AG 新版本已成功构建并发布！"
+              echo ""
+              echo "🔗 下载地址：${SERVER_URL}/${REPOSITORY}/releases/tag/${TAG_NAME}"
+              echo ""
+              echo "📦 版本信息"
+              echo "- 版本号：${VERSION}"
+              echo "- 构建时间：${BUILD_TIME}"
+              echo ""
+              echo "📝 原仓库最新提交"
+              echo ""
+              echo "【dev 分支】"
+              echo "- 提交哈希：${DEV_LATEST_COMMIT}"
+              echo "- 提交说明：${DEV_LATEST_COMMIT_MSG}"
+              echo "- 提交时间：${DEV_LATEST_COMMIT_TIME}"
+              echo ""
+              echo "【main 分支】"
+              echo "- 提交哈希：${MAIN_LATEST_COMMIT}"
+              echo "- 提交说明：${MAIN_LATEST_COMMIT_MSG}"
+              echo "- 提交时间：${MAIN_LATEST_COMMIT_TIME}"
+            } > email-body.txt
+          else
+            SUBJECT="❌ Sesame-AG 构建失败"
+            {
+              echo "❌ Sesame-AG 构建流程出现失败，请查看详情排查。"
+              echo ""
+              echo "🔗 错误日志：${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
+              echo ""
+              echo "🚨 常见失败原因"
+              echo "1. 配置文件语法错误"
+              echo "2. 依赖下载失败（网络问题）"
+              echo "3. 签名密钥配置错误"
+              echo "4. 原仓库代码变更导致编译失败"
+              echo ""
+              echo "🔧 排查建议"
+              echo "点击上方链接进入构建详情，查看红色报错步骤的具体日志"
+              echo "若为网络问题，点击右上角「Re-run jobs」重新执行即可"
+            } > email-body.txt
+          fi
+
+          if [ "$HAS_UPDATE" == "true" ]; then
+            echo "" >> email-body.txt
+            echo "📥 本次同步全部提交" >> email-body.txt
+            echo "$CHANGE_LOG" | while read -r line; do
+              echo "- $line" >> email-body.txt
+            done
+          fi
+
+          echo "subject=${SUBJECT}" >> "$GITHUB_OUTPUT"
+          echo "✅ 邮件内容已生成"
+
+      - name: 发送构建结果邮件
+        uses: dawidd6/action-send-mail@v6
+        with:
+          server_address: smtp.qq.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          to: ${{ secrets.EMAIL_RECEIVER }}
+          from: GitHub Actions 自动构建
+          subject: ${{ steps.gen_email.outputs.subject }}
+          body: file://email-body.txt
+  # 任务4：构建失败摘要补充
   notify-failure:
     runs-on: ubuntu-latest
     needs: [ sync-upstream, build-and-sign ]
