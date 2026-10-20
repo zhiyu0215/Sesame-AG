@@ -94,7 +94,7 @@ jobs:
         if: steps.check_update.outputs.has_update == 'true'
         run: git push origin dev
 
-  # 任务2：构建APK、签名、发布Release、清理旧版本
+  # 任务2：构建APK、发布Release、清理旧版本（已临时屏蔽签名）
   build-and-sign:
     runs-on: ubuntu-latest
     needs: sync-upstream
@@ -159,40 +159,34 @@ jobs:
       - name: 执行Release构建
         run: ./gradlew --no-daemon --stacktrace assembleRelease
 
-      - name: 准备待签名的APK文件
-        run: |
-          rm -rf "${STAGING_DIR}" "${ASSET_DIR}"
-          mkdir -p "${STAGING_DIR}"
-          mapfile -t apks < <(find "${RELEASE_DIR}" -maxdepth 1 -type f -name "*.apk" | sort)
-          for apk in "${apks[@]}"; do
-            cp "${apk}" "${STAGING_DIR}/"
-          done
+      # ========== 【临时屏蔽 APK 签名步骤】 ==========
+      # - name: 对APK进行签名
+      #   id: sign_apks
+      #   uses: ilharp/sign-android-release@v2
+      #   with:
+      #     releaseDir: ${{ env.STAGING_DIR }}
+      #     signingKey: ${{ secrets.KEYSTORE_BASE64 }}
+      #     keyAlias: ${{ secrets.KEY_ALIAS }}
+      #     keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+      #     keyPassword: ${{ secrets.KEY_PASSWORD }}
+      #     buildToolsVersion: ${{ env.ANDROID_BUILD_TOOLS }}
 
-      - name: 对APK进行签名
-        id: sign_apks
-        uses: ilharp/sign-android-release@v2
-        with:
-          releaseDir: ${{ env.STAGING_DIR }}
-          signingKey: ${{ secrets.KEYSTORE_BASE64 }}
-          keyAlias: ${{ secrets.KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-          buildToolsVersion: ${{ env.ANDROID_BUILD_TOOLS }}
+      # - name: 显示签名完成的文件列表
+      #   run: |
+      #     echo "## ✅ 成功签名以下APK文件" >> $GITHUB_STEP_SUMMARY
+      #     echo "" >> $GITHUB_STEP_SUMMARY
+      #     echo "${{ steps.sign_apks.outputs.signedFiles }}" | tr ':' '\n' | while read -r file; do
+      #       echo "- $(basename "$file")" >> $GITHUB_STEP_SUMMARY
+      #     done
 
-      - name: 显示签名完成的文件列表
-        run: |
-          echo "## ✅ 成功签名以下APK文件" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.sign_apks.outputs.signedFiles }}" | tr ':' '\n' | while read -r file; do
-            echo "- $(basename "$file")" >> $GITHUB_STEP_SUMMARY
-          done
-
-      - name: 生成SHA256校验文件与版本信息
+      - name: 生成SHA256校验文件与版本信息（未签名APK）
         id: prepare_assets
         run: |
+          rm -rf "${ASSET_DIR}"
           mkdir -p "${ASSET_DIR}"
-          IFS=':' read -r -a files <<< "${{ steps.sign_apks.outputs.signedFiles }}"
-          for file in "${files[@]}"; do
+          # 直接读取原始release目录下未签名APK
+          mapfile -t apks < <(find "${RELEASE_DIR}" -maxdepth 1 -type f -name "*.apk" | sort)
+          for file in "${apks[@]}"; do
             cp "${file}" "${ASSET_DIR}/"
             (
               cd "${ASSET_DIR}"
@@ -285,6 +279,7 @@ jobs:
           | `x86_64` | 64位x86架构，部分安卓模拟器 |
           | `x86` | 32位x86架构，极少老旧模拟器 |
 
+          > ⚠️ 当前为**未签名APK**，仅用于测试编译，安卓系统默认禁止直接安装
           > 安装完成后，请在LSPosed框架中激活模块并重启设备生效。
           BODY_EOF
 
