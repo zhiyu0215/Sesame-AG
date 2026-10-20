@@ -94,8 +94,6 @@ jobs:
         if: steps.check_update.outputs.has_update == 'true'
         run: git push origin dev
 
-      # 自定义改动统一在 customizations/apply.sh 中维护
-
   # 任务2：构建APK、签名、发布Release、清理旧版本
   build-and-sign:
     runs-on: ubuntu-latest
@@ -157,9 +155,6 @@ jobs:
 
       - name: 赋予Gradle执行权限
         run: chmod +x gradlew
-
-      - name: 应用自定义改动
-        run: bash customizations/apply.sh
 
       - name: 执行Release构建
         run: ./gradlew --no-daemon --stacktrace assembleRelease
@@ -342,3 +337,16 @@ jobs:
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "✅ 旧版本清理完成" >> "$GITHUB_STEP_SUMMARY"
+
+  # 任务3：构建失败摘要补充
+  notify-failure:
+    runs-on: ubuntu-latest
+    needs: [ sync-upstream, build-and-sign ]
+    if: ${{ failure() }}
+    steps:
+      - name: 输出失败提示
+        run: |
+          echo "## ❌ 构建执行失败" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "请点击左侧失败的任务步骤，查看红色报错的详细日志信息。" >> $GITHUB_STEP_SUMMARY
+          echo "若为网络/临时环境问题，可点击右上角「Re-run all jobs」重试。" >> $GITHUB_STEP_SUMMARY
